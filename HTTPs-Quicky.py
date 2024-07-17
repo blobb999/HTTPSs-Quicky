@@ -16,6 +16,7 @@ from werkzeug.serving import make_server
 import configparser
 import base64
 import hashlib
+import pyperclip
 from cryptography.fernet import Fernet
 
 app = Flask(__name__)
@@ -71,6 +72,7 @@ def decrypt_config(password):
         print(f"Failed to decrypt config: {e}")
         return False
 
+
 def load_config(password=None):
     if os.path.exists(config_file) and is_encrypted(config_file):
         if password:
@@ -100,6 +102,7 @@ def load_config(password=None):
             mask_var.set(config['DynDNS'].get('mask', 'Apache/2.4.41 (Ubuntu)'))
             url_entry.delete(0, tk.END)
             url_entry.insert(0, config['DynDNS'].get('url', ''))
+            update_url()  # Update the URL after loading the config
         print(f"Config loaded: {config['DynDNS']}")
     else:
         port_entry.insert(0, '80')
@@ -497,16 +500,31 @@ def update_url():
     global custom_image_url
     protocol = "http" if http_var.get() else "https"
     domain = domain_entry.get()
-    url = f"{protocol}://{domain}"
+    port = port_entry.get()
+    
+    if port and port != "80":
+        url = f"{protocol}://{domain}:{port}"
+    else:
+        url = f"{protocol}://{domain}"
+
     if image_path:
         # Replace backslashes with forward slashes for URL compatibility
         path_for_url = anonymize_path(image_path)
         url = f"{url}/{path_for_url}"
+    
     current_url = url_entry.get()
     if current_url != url:
         url_entry.delete(0, tk.END)
         url_entry.insert(0, url)
     custom_image_url = url
+
+
+
+def copy_url():
+    url = url_entry.get()
+    pyperclip.copy(url)
+    messagebox.showinfo("URL Copied", "The URL has been copied to the clipboard.")
+
 
 def browse_image():
     global image_path
@@ -555,6 +573,9 @@ url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
 browse_button = ttk.Button(url_frame, text="Browse Image", command=browse_image)
 browse_button.pack(side=tk.LEFT)
+
+copy_button = ttk.Button(url_frame, text="Copy URL", command=copy_url)
+copy_button.pack(side=tk.LEFT)
 
 port_label = ttk.Label(url_frame, text="Port:")
 port_label.pack(side=tk.LEFT)
