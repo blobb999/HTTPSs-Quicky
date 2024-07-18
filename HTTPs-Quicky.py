@@ -534,6 +534,7 @@ def list_dyndns_domains():
     def select_domain(domain):
         domain_entry.delete(0, tk.END)
         domain_entry.insert(0, domain)
+        update_url()  # Update the URL after selecting the domain
         list_window.destroy()
 
     api_key = api_key_entry.get()
@@ -555,6 +556,7 @@ def list_dyndns_domains():
                 button.pack(fill=tk.X, padx=10, pady=5)
     else:
         messagebox.showerror("Error", "Failed to retrieve domains")
+
 
 
 def remove_dyndns():
@@ -587,6 +589,10 @@ def update_url():
     global custom_image_url
     protocol = "http" if http_var.get() else "https"
     domain = domain_entry.get()
+    
+    if not domain:  # Wenn keine Domain angegeben ist, verwenden Sie die öffentliche IP-Adresse
+        domain = get_public_ip()
+    
     port = port_entry.get()
     
     if port and port != "80":
@@ -605,6 +611,8 @@ def update_url():
         url_entry.insert(0, url)
     custom_image_url = url
 
+def on_domain_entry_change(event):
+    update_url()
 
 
 def copy_url():
@@ -730,6 +738,8 @@ domain_label = ttk.Label(dyn_dns_tab, text="Domain:")
 domain_label.pack(fill=tk.X)
 domain_entry = ttk.Entry(dyn_dns_tab)
 domain_entry.pack(fill=tk.X)
+
+domain_entry.bind("<KeyRelease>", on_domain_entry_change)
 
 api_key_label = ttk.Label(dyn_dns_tab, text="API Key:")
 api_key_label.pack(fill=tk.X)
