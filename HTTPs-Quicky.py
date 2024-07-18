@@ -19,6 +19,7 @@ import base64
 import hashlib
 import pyperclip
 import logging
+import mimetypes
 from cryptography.fernet import Fernet
 
 app = Flask(__name__)
@@ -53,9 +54,12 @@ class CustomRequestHandler(WSGIRequestHandler):
                 logging.warning('SSL error encountered: %s', e)
             else:
                 raise
+        except (BrokenPipeError, ConnectionResetError) as e:
+            logging.warning('Connection error encountered: %s', e)
 
 
-def send_file_in_chunks(file_path, chunk_size=8192):
+
+def send_file_in_chunks(file_path, chunk_size=8192, mime_type=None):
     def generate():
         with open(file_path, 'rb') as file:
             while True:
@@ -63,7 +67,11 @@ def send_file_in_chunks(file_path, chunk_size=8192):
                 if not chunk:
                     break
                 yield chunk
-    return Response(generate(), headers={'Content-Disposition': f'attachment; filename={os.path.basename(file_path)}'})
+    return Response(generate(), headers={
+        'Content-Disposition': f'inline; filename={os.path.basename(file_path)}',
+        'Content-Type': mime_type or 'application/octet-stream'
+    })
+
 
 
 def anonymize_path(path):
@@ -72,11 +80,14 @@ def anonymize_path(path):
 
 def de_anonymize_path(encoded_path):
     # Ensure the Base64 string has the correct padding
-    padding_needed = len(encoded_path) % 4
-    if padding_needed != 0:
-        encoded_path += '=' * (4 - padding_needed)
-    decoded_bytes = base64.urlsafe_b64decode(encoded_path)
-    return str(decoded_bytes, 'utf-8')
+    encoded_path += '=' * (-len(encoded_path) % 4)
+    try:
+        decoded_bytes = base64.urlsafe_b64decode(encoded_path)
+        return str(decoded_bytes, 'utf-8')
+    except Exception as e:
+        logging.error(f"Error decoding path: {e}")
+        raise
+
 
 
 def generate_key_from_password(password):
@@ -331,7 +342,7 @@ def create_ssl_cert_and_key():
 def index(subpath=None):
     global show_image, custom_image_url, image_path, publish_folder_var
     ip_address = request.remote_addr
-    
+
     # Ignore favicon.ico requests
     if subpath == 'favicon.ico':
         return abort(404)
@@ -353,7 +364,11 @@ def index(subpath=None):
 
     if subpath:
         # De-Anonymisieren des Pfades
-        decoded_path = de_anonymize_path(subpath)
+        try:
+            decoded_path = de_anonymize_path(subpath)
+        except Exception:
+            abort(400)  # Bad Request if the path cannot be decoded
+
         if publish_folder_var.get() and os.path.isdir(decoded_path):
             files = os.listdir(decoded_path)
             file_list = ""
@@ -362,7 +377,8 @@ def index(subpath=None):
                 if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                     file_list += f'<div class="grid-item"><img src="{file_url}" alt="{file}" style="max-width:100%; max-height:100%;"/></div>'
                 elif file.lower().endswith(('.mp4', '.webm', '.ogg')):
-                    file_list += f'<div class="grid-item"><video width="100%" height="auto" controls><source src="{file_url}" type="video/mp4">Your browser does not support the video tag.</video></div>'
+                    mime_type, _ = mimetypes.guess_type(file)
+                    file_list += f'<div class="grid-item"><video width="100%" height="auto" controls><source src="{file_url}" type="{mime_type}">Your browser does not support the video tag.</video></div>'
                 else:
                     file_list += f'<div class="grid-item"><a href="{file_url}" download>{file}</a></div>'
 
@@ -399,14 +415,8 @@ def index(subpath=None):
             """
             return html_content
         elif os.path.isfile(decoded_path):
-            # Senden Sie die Datei direkt
-            if decoded_path.lower().endswith(('.mp4', '.webm', '.ogg')):
-                mime_type = 'video/mp4' if decoded_path.lower().endswith('.mp4') else \
-                            'video/webm' if decoded_path.lower().endswith('.webm') else \
-                            'video/ogg'
-                return send_file(decoded_path, mimetype=mime_type)
-            else:
-                return send_file(decoded_path)
+            mime_type, _ = mimetypes.guess_type(decoded_path)
+            return send_file_in_chunks(decoded_path, mime_type=mime_type)
         else:
             abort(404)
     elif show_image and os.path.isfile(image_path):
@@ -415,21 +425,18 @@ def index(subpath=None):
         return "Hello, World!"
 
 
-
 @app.route('/files/<path:encoded_filename>')
 def serve_file(encoded_filename):
     decoded_filename = de_anonymize_path(encoded_filename)
+    mime_type, _ = mimetypes.guess_type(decoded_filename)
     try:
-        # Bestimmen Sie den MIME-Typ basierend auf der Dateierweiterung
-        if decoded_filename.lower().endswith(('.mp4', '.webm', '.ogg')):
-            mime_type = 'video/mp4' if decoded_filename.lower().endswith('.mp4') else \
-                        'video/webm' if decoded_filename.lower().endswith('.webm') else \
-                        'video/ogg'
-            return send_file(decoded_filename, mimetype=mime_type)
-        else:
-            return send_file(decoded_filename)
+        return send_file_in_chunks(decoded_filename, mime_type=mime_type)
     except FileNotFoundError:
+        logging.error(f"File not found: {decoded_filename}")
         abort(404)
+    except Exception as e:
+        logging.error(f"Error serving file {decoded_filename}: {e}")
+        abort(500)
 
 
 @app.after_request
