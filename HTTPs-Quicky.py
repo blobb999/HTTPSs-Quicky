@@ -137,6 +137,10 @@ def load_config(password=None):
             url_entry.delete(0, tk.END)
             url_entry.insert(0, config['DynDNS'].get('url', ''))
             update_url()  # Update the URL after loading the config
+            
+            # Call to update the button label based on the loaded config
+            on_publish_folder_checkbox_toggle()
+            
         print(f"Config loaded: {config['DynDNS']}")
     else:
         port_entry.insert(0, '80')
@@ -595,7 +599,7 @@ def update_url():
     
     port = port_entry.get()
     
-    if port and port != "80":
+    if port and port != "80" and port != "":
         url = f"{protocol}://{domain}:{port}"
     else:
         url = f"{protocol}://{domain}"
@@ -610,8 +614,13 @@ def update_url():
         url_entry.delete(0, tk.END)
         url_entry.insert(0, url)
     custom_image_url = url
+    
 
 def on_domain_entry_change(event):
+    update_url()
+
+
+def on_port_entry_change(event):
     update_url()
 
 
@@ -676,6 +685,8 @@ port_label = ttk.Label(url_frame, text="Port:")
 port_label.pack(side=tk.LEFT)
 port_entry = ttk.Entry(url_frame)
 port_entry.pack(side=tk.LEFT)
+
+port_entry.bind("<KeyRelease>", on_port_entry_change)
 
 # Toggle-Button für Starten/Stoppen des Servers
 button_frame = ttk.Frame(frame)
