@@ -59,18 +59,21 @@ class CustomRequestHandler(WSGIRequestHandler):
 
 
 
-def send_file_in_chunks(file_path, chunk_size=8192, mime_type=None):
+
+def send_file_in_chunks(file_path, chunk_size=8192):
     def generate():
         with open(file_path, 'rb') as file:
             while True:
                 chunk = file.read(chunk_size)
                 if not chunk:
                     break
-                yield chunk
-    return Response(generate(), headers={
-        'Content-Disposition': f'inline; filename={os.path.basename(file_path)}',
-        'Content-Type': mime_type or 'application/octet-stream'
-    })
+                try:
+                    yield chunk
+                except (BrokenPipeError, ConnectionResetError) as e:
+                    logging.warning('Connection error during file transfer: %s', e)
+                    break
+    return Response(generate(), headers={'Content-Disposition': f'attachment; filename={os.path.basename(file_path)}'})
+
 
 
 
@@ -428,15 +431,19 @@ def index(subpath=None):
 @app.route('/files/<path:encoded_filename>')
 def serve_file(encoded_filename):
     decoded_filename = de_anonymize_path(encoded_filename)
-    mime_type, _ = mimetypes.guess_type(decoded_filename)
     try:
-        return send_file_in_chunks(decoded_filename, mime_type=mime_type)
+        # Bestimmen Sie den MIME-Typ basierend auf der Dateierweiterung
+        mime_type = None
+        if decoded_filename.lower().endswith(('.mp4', '.webm', '.ogg')):
+            mime_type = 'video/mp4' if decoded_filename.lower().endswith('.mp4') else \
+                        'video/webm' if decoded_filename.lower().endswith('.webm') else \
+                        'video/ogg'
+        return send_file(decoded_filename, mimetype=mime_type)
     except FileNotFoundError:
-        logging.error(f"File not found: {decoded_filename}")
         abort(404)
-    except Exception as e:
-        logging.error(f"Error serving file {decoded_filename}: {e}")
-        abort(500)
+    except (BrokenPipeError, ConnectionResetError) as e:
+        logging.warning('Connection error during file transfer: %s', e)
+
 
 
 @app.after_request
