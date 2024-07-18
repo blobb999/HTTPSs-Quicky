@@ -36,6 +36,9 @@ http_server = None
 
 config_file = 'config.cfg'
 
+saved_password = None
+config_data = None  # Initialisierung
+
 from werkzeug.serving import WSGIRequestHandler
 
 class CustomRequestHandler(WSGIRequestHandler):
@@ -99,26 +102,44 @@ def decrypt_config(password):
         encrypted_data = file.read()
     try:
         decrypted_data = cipher.decrypt(encrypted_data)
-        with open(config_file, 'wb') as file:
-            file.write(decrypted_data)
+        global config_data
+        config_data = decrypted_data.decode('utf-8')  # Decoding as UTF-8
+        global saved_password
+        saved_password = password
         return True
     except Exception as e:
         print(f"Failed to decrypt config: {e}")
         return False
 
 
+
+def config_to_string(config):
+    with open('config_temp.ini', 'w') as configfile:
+        config.write(configfile)
+    with open('config_temp.ini', 'r') as configfile:
+        config_string = configfile.read()
+    os.remove('config_temp.ini')
+    return config_string
+
+
 def load_config(password=None):
-    if os.path.exists(config_file) and is_encrypted(config_file):
-        if password:
-            if not decrypt_config(password):
-                messagebox.showerror("Error", "Incorrect password or failed to decrypt config.")
-                return
-        else:
-            open_load_config_dialog()
-            return  # Wait for the dialog to handle the decryption
-    config = configparser.ConfigParser()
+    global config_data
     if os.path.exists(config_file):
-        config.read(config_file)
+        if is_encrypted(config_file):
+            if password:
+                if not decrypt_config(password):
+                    messagebox.showerror("Error", "Incorrect password or failed to decrypt config.")
+                    return
+            else:
+                open_load_config_dialog()
+                return  # Wait for the dialog to handle the decryption
+        else:
+            with open(config_file, 'r') as file:
+                config_data = file.read()
+
+    if config_data:
+        config = configparser.ConfigParser()
+        config.read_string(config_data)
         if 'DynDNS' in config:
             user_entry.delete(0, tk.END)
             password_entry.delete(0, tk.END)
@@ -147,6 +168,7 @@ def load_config(password=None):
         print("No config file found.")
 
 
+
 def is_encrypted(file_path):
     try:
         with open(file_path, 'rb') as file:
@@ -158,8 +180,8 @@ def is_encrypted(file_path):
     return False
 
 
-
 def save_config(encrypted=False, password=None):
+    global config_data
     config = configparser.ConfigParser()
     config['DynDNS'] = {
         'user': user_entry.get(),
@@ -173,19 +195,33 @@ def save_config(encrypted=False, password=None):
         'mask': mask_var.get(),
         'url': url_entry.get()
     }
-    with open(config_file, 'w') as configfile:
-        config.write(configfile)
+    config_data = config_to_string(config)
+    
     if encrypted and password:
         encrypt_config(password)
+    else:
+        with open(config_file, 'w') as configfile:
+            configfile.write(config_data)
     print("Config saved.")
 
+
+
 def open_save_config_dialog():
-    dialog = tk.Toplevel()
+    dialog = tk.Toplevel(app_gui)
     dialog.title("Save Config")
 
     ttk.Label(dialog, text="Enter password to encrypt config (optional):").pack(pady=10)
     password_entry = ttk.Entry(dialog, show='*')
     password_entry.pack(pady=5)
+
+    if saved_password:
+        password_entry.insert(0, saved_password)
+
+    def update_button():
+        if password_entry.get():
+            save_button.config(text="Save Config Encrypted", command=save_encrypted)
+        else:
+            save_button.config(text="Just Save", command=save_unencrypted)
 
     def save_unencrypted():
         save_config(encrypted=False)
@@ -195,16 +231,24 @@ def open_save_config_dialog():
         password = password_entry.get()
         if password:
             save_config(encrypted=True, password=password)
+            global saved_password
+            saved_password = password
         else:
             messagebox.showwarning("Warning", "Password is empty, saving unencrypted.")
             save_unencrypted()
         dialog.destroy()
 
-    ttk.Button(dialog, text="Just Save", command=save_unencrypted).pack(side=tk.LEFT, padx=10, pady=10)
-    ttk.Button(dialog, text="Save Encrypted", command=save_encrypted).pack(side=tk.RIGHT, padx=10, pady=10)
+    password_entry.bind("<KeyRelease>", lambda event: update_button())
+
+    save_button = ttk.Button(dialog, text="Just Save", command=save_unencrypted)
+    save_button.pack(pady=10)
+
+    # Initialize button state
+    update_button()
+
 
 def open_load_config_dialog():
-    dialog = tk.Toplevel()
+    dialog = tk.Toplevel(app_gui)
     dialog.title("Load Config")
 
     ttk.Label(dialog, text="Enter password to decrypt config:").pack(pady=10)
@@ -215,7 +259,8 @@ def open_load_config_dialog():
         password = password_entry.get()
         if password:
             if decrypt_config(password):
-                load_config()  # Load the config after decrypting
+                load_config(password)  # Load the config after decrypting
+                dialog.destroy()
             else:
                 messagebox.showwarning("Warning", "Failed to decrypt config. Incorrect password?")
         else:
@@ -223,6 +268,13 @@ def open_load_config_dialog():
         dialog.destroy()
 
     ttk.Button(dialog, text="Load", command=load_encrypted).pack(pady=10)
+
+    # Make the dialog modal
+    dialog.transient(app_gui)
+    dialog.grab_set()
+    app_gui.wait_window(dialog)
+
+
 
 
 def create_ssl_cert_and_key():
@@ -614,6 +666,7 @@ def update_url():
         url_entry.delete(0, tk.END)
         url_entry.insert(0, url)
     custom_image_url = url
+
     
 
 def on_domain_entry_change(event):
@@ -632,16 +685,31 @@ def copy_url():
 
 def browse_image():
     global image_path
+    # Extract the current path from the URL
+    current_url = url_entry.get()
+    if current_url:
+        url_parts = current_url.split('/')
+        if len(url_parts) > 3:  # Ensure there is a path component
+            initial_path = '/'.join(url_parts[3:])  # Join all parts after the domain
+            initial_path = de_anonymize_path(initial_path)  # De-anonymize the path
+            if not os.path.exists(initial_path):
+                initial_path = os.getcwd()  # Fallback to current directory if path doesn't exist
+        else:
+            initial_path = os.getcwd()  # Fallback to current directory if URL doesn't have a path
+    else:
+        initial_path = os.getcwd()  # Fallback to current directory if URL is empty
+    
     if publish_folder_var.get():
-        folder_path = filedialog.askdirectory(initialdir=os.getcwd(), title="Select a folder")
+        folder_path = filedialog.askdirectory(initialdir=initial_path, title="Select a folder")
         if folder_path:
             image_path = folder_path
     else:
-        file_path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select an image",
+        file_path = filedialog.askopenfilename(initialdir=initial_path, title="Select an image",
                                                filetypes=(("jpeg files", "*.jpg"), ("all files", "*.*")))
         if file_path:
             image_path = file_path
     update_url()
+
 
 def on_image_checkbox_toggle():
     global show_image
@@ -714,7 +782,7 @@ publish_folder_var = tk.BooleanVar()
 publish_folder_checkbox = ttk.Checkbutton(checkbox_frame, text="Publish Folder", variable=publish_folder_var, command=on_publish_folder_checkbox_toggle)
 publish_folder_checkbox.pack(side=tk.LEFT)
 
-mask_label = ttk.Label(checkbox_frame, text="Mask:")
+mask_label = ttk.Label(checkbox_frame, text="¦ Server Mask:")
 mask_label.pack(side=tk.LEFT)
 
 mask_var = tk.StringVar(value="Apache/2.4.41 (Ubuntu)")
