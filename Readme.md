@@ -5,7 +5,7 @@ Das Tool unterstützt die Verschlüsselung der Konfigurationsdateien und schütz
 HTTPs-Quicky ermöglicht die Maskierung des Servers als gängige Webserver und bietet eine anpassbare Serverumgebung. 
 Ideal für Entwickler und Administratoren, die eine sichere und flexible Schnell-Lösung für Webserver benötigen.
 
-![HTTPs-Quicky](https://github.com/user-attachments/assets/95d58dad-467b-4a42-a28d-7220d21ad1ad)
+![HTTPs-Quicky](https://github.com/user-attachments/assets/ff2c94fc-3123-438f-ba87-27ac8ac118e9)
 
 Abhängigkeiten:
 
