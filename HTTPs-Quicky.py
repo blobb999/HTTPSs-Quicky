@@ -2,7 +2,8 @@ import os
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
-from flask import Flask, request, send_file, abort, make_response
+from flask import Flask, request, send_file, abort, make_response, send_from_directory
+from flask import Response
 import geoip2.database
 from datetime import datetime, timedelta
 from cryptography.hazmat.backends import default_backend
@@ -17,6 +18,7 @@ import configparser
 import base64
 import hashlib
 import pyperclip
+import logging
 from cryptography.fernet import Fernet
 
 app = Flask(__name__)
@@ -34,13 +36,45 @@ http_server = None
 
 config_file = 'config.cfg'
 
+from werkzeug.serving import WSGIRequestHandler
+
+class CustomRequestHandler(WSGIRequestHandler):
+    def log_request(self, code='-', size='-'):
+        self.log("info", '"%s" %s %s', self.requestline, code, size)
+
+    def handle(self):
+        try:
+            super().handle()
+        except ssl.SSLError as e:
+            if 'SSLV3_ALERT_CERTIFICATE_UNKNOWN' in str(e):
+                logging.warning('SSL error encountered: %s', e)
+            else:
+                raise
+
+
+def send_file_in_chunks(file_path, chunk_size=8192):
+    def generate():
+        with open(file_path, 'rb') as file:
+            while True:
+                chunk = file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    return Response(generate(), headers={'Content-Disposition': f'attachment; filename={os.path.basename(file_path)}'})
+
+
 def anonymize_path(path):
     encoded_bytes = base64.urlsafe_b64encode(path.encode('utf-8'))
     return str(encoded_bytes, 'utf-8')
 
 def de_anonymize_path(encoded_path):
+    # Ensure the Base64 string has the correct padding
+    padding_needed = len(encoded_path) % 4
+    if padding_needed != 0:
+        encoded_path += '=' * (4 - padding_needed)
     decoded_bytes = base64.urlsafe_b64decode(encoded_path)
     return str(decoded_bytes, 'utf-8')
+
 
 def generate_key_from_password(password):
     # SHA-256 hash of the password
@@ -241,6 +275,11 @@ def create_ssl_cert_and_key():
 def index(subpath=None):
     global show_image, custom_image_url, image_path, publish_folder_var
     ip_address = request.remote_addr
+    
+    # Ignore favicon.ico requests
+    if subpath == 'favicon.ico':
+        return abort(404)
+
     try:
         response = geoip_reader.city(ip_address)
         city = response.city.name if response.city.name else 'Unknown City'
@@ -304,7 +343,14 @@ def index(subpath=None):
             """
             return html_content
         elif os.path.isfile(decoded_path):
-            return send_file(decoded_path)
+            # Senden Sie die Datei direkt
+            if decoded_path.lower().endswith(('.mp4', '.webm', '.ogg')):
+                mime_type = 'video/mp4' if decoded_path.lower().endswith('.mp4') else \
+                            'video/webm' if decoded_path.lower().endswith('.webm') else \
+                            'video/ogg'
+                return send_file(decoded_path, mimetype=mime_type)
+            else:
+                return send_file(decoded_path)
         else:
             abort(404)
     elif show_image and os.path.isfile(image_path):
@@ -312,10 +358,23 @@ def index(subpath=None):
     else:
         return "Hello, World!"
 
+
+
 @app.route('/files/<path:encoded_filename>')
 def serve_file(encoded_filename):
     decoded_filename = de_anonymize_path(encoded_filename)
-    return send_file(decoded_filename)
+    try:
+        # Bestimmen Sie den MIME-Typ basierend auf der Dateierweiterung
+        if decoded_filename.lower().endswith(('.mp4', '.webm', '.ogg')):
+            mime_type = 'video/mp4' if decoded_filename.lower().endswith('.mp4') else \
+                        'video/webm' if decoded_filename.lower().endswith('.webm') else \
+                        'video/ogg'
+            return send_file(decoded_filename, mimetype=mime_type)
+        else:
+            return send_file(decoded_filename)
+    except FileNotFoundError:
+        abort(404)
+
 
 @app.after_request
 def apply_server_header(response):
@@ -332,19 +391,20 @@ def start_flask():
         port = None
     if http_var.get():
         if port:
-            http_server = make_server('0.0.0.0', port, app)
+            http_server = make_server('0.0.0.0', port, app, request_handler=CustomRequestHandler)
         else:
-            http_server = make_server('0.0.0.0', 80, app)
+            http_server = make_server('0.0.0.0', 80, app, request_handler=CustomRequestHandler)
         http_server.serve_forever()
     else:
         ssl_cert_path, ssl_key_path = create_ssl_cert_and_key()
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(ssl_cert_path, ssl_key_path)
         if port:
-            http_server = make_server('0.0.0.0', port, app, ssl_context=context)
+            http_server = make_server('0.0.0.0', port, app, ssl_context=context, request_handler=CustomRequestHandler)
         else:
-            http_server = make_server('0.0.0.0', 443, app, ssl_context=context)
+            http_server = make_server('0.0.0.0', 443, app, ssl_context=context, request_handler=CustomRequestHandler)
         http_server.serve_forever()
+
 
 def toggle_server():
     global running
@@ -469,6 +529,33 @@ def create_dyndns():
             messagebox.showerror("Error", f"Failed to create DynDNS: {response.json()}")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to create DynDNS: {e}")
+
+def list_dyndns_domains():
+    def select_domain(domain):
+        domain_entry.delete(0, tk.END)
+        domain_entry.insert(0, domain)
+        list_window.destroy()
+
+    api_key = api_key_entry.get()
+    headers = {
+        'accept': 'application/json',
+        'API-Key': api_key
+    }
+    response = requests.get('https://api.dynu.com/v2/dns', headers=headers)
+    
+    if response.status_code == 200:
+        domains = response.json().get('domains', [])
+        list_window = tk.Toplevel()
+        list_window.title("List of DynDNS Domains")
+        
+        for domain in domains:
+            domain_name = domain.get('name')
+            if domain_name:
+                button = ttk.Button(list_window, text=domain_name, command=lambda d=domain_name: select_domain(d))
+                button.pack(fill=tk.X, padx=10, pady=5)
+    else:
+        messagebox.showerror("Error", "Failed to retrieve domains")
+
 
 def remove_dyndns():
     api_key = api_key_entry.get()
@@ -660,6 +747,10 @@ update_button.pack(fill=tk.X)
 # DynDNS-Create-Button
 create_button = ttk.Button(dyn_dns_tab, text="Create Dyndns Domain", command=create_dyndns)
 create_button.pack(fill=tk.X)
+
+# DynDNS-List-Button
+list_button = ttk.Button(dyn_dns_tab, text="List Dyndns Domains", command=list_dyndns_domains)
+list_button.pack(fill=tk.X)
 
 # DynDNS-Remove-Button
 remove_button = ttk.Button(dyn_dns_tab, text="Remove Dyndns Domain", command=remove_dyndns)
