@@ -1,6 +1,7 @@
 import os
 import requests
 import configparser
+import geoip2.database
 
 def check_and_update_geolite2_db(config_file='config.cfg', geoip_db_path='GeoLite2-City.mmdb', download_url='https://github.com/P3TERX/GeoLite.mmdb/releases/download/2024.07.22/GeoLite2-City.mmdb'):
     config = configparser.ConfigParser()
@@ -21,6 +22,17 @@ def check_and_update_geolite2_db(config_file='config.cfg', geoip_db_path='GeoLit
             print("GeoLite2 Datenbank vorhanden, aber keine Version in der config.cfg eingetragen.")
         else:
             print(f"GeoLite2 Datenbank Version: {config['GeoLite2']['version']}")
+        
+        # Überprüfen, ob die Datenbank gültig ist
+        try:
+            geoip_reader = geoip2.database.Reader(geoip_db_path)
+            geoip_reader.close()
+        except Exception as e:
+            print(f"ERROR:root:Fehler beim Laden der GeoIP-Datenbank: {e}")
+            print("GeoLite2-City.mmdb wird gelöscht und neu heruntergeladen.")
+            os.remove(geoip_db_path)
+            download_geolite2_db(download_url, geoip_db_path)
+            update_config_with_version(config, config_file, geoip_db_path)
 
 def download_geolite2_db(download_url, geoip_db_path):
     try:
@@ -46,3 +58,6 @@ def update_config_with_version(config, config_file, geoip_db_path):
     with open(config_file, 'w') as configfile:
         config.write(configfile)
     print(f"Version {version} der GeoLite2 Datenbank in der config.cfg eingetragen.")
+
+if __name__ == "__main__":
+    check_and_update_geolite2_db()
