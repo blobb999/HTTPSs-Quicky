@@ -10,4 +10,7 @@ Ideal für Entwickler und Administratoren, die eine sichere und flexible Schnell
 Abhängigkeiten:
 
 	1. GeoLite2-City.mmdb - https://github.com/P3TERX/GeoLite.mmdb/releases
-	2. Optional DynDns Konto.
+		Falls nicht vorhanden, wird die Datenbank automatisch ins  Programmverzeichnis heruntergeladen.
+		
+	2. Optional DynDns Konto. 
+		Falls keine Domaine bei DynDns eingetragen ist, wird die Public IP verwendet.

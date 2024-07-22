@@ -21,6 +21,8 @@ import pyperclip
 import logging
 import hashlib
 
+import UpdateChk  # Füge diese Zeile hinzu
+
 app = Flask(__name__)
 
 geoip_db_path = 'GeoLite2-City.mmdb'
@@ -74,6 +76,7 @@ def initialize_geoip_reader():
         logging.error(f"Fehler beim Laden der GeoIP-Datenbank: {e}")
         geoip_reader = None
 
+UpdateChk.check_and_update_geolite2_db()
 initialize_geoip_reader()
 
 def send_file_in_chunks(file_path, mime_type, chunk_size=8192):
