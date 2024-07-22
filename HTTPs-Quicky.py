@@ -1,3 +1,4 @@
+import UpdateChk
 import os
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
@@ -21,7 +22,6 @@ import pyperclip
 import logging
 import hashlib
 
-import UpdateChk  # Füge diese Zeile hinzu
 
 app = Flask(__name__)
 
@@ -76,8 +76,10 @@ def initialize_geoip_reader():
         logging.error(f"Fehler beim Laden der GeoIP-Datenbank: {e}")
         geoip_reader = None
 
+print("Überprüfe und aktualisiere GeoLite2-Datenbank, bitte warten...")
 UpdateChk.check_and_update_geolite2_db()
 initialize_geoip_reader()
+print("GeoLite2-Datenbank erfolgreich überprüft und ggf. aktualisiert.")
 
 def send_file_in_chunks(file_path, mime_type, chunk_size=8192):
     def generate():
